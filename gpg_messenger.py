@@ -812,6 +812,7 @@ class GPGApp(tk.Tk):
             ("File Encrypt",   self._build_file_tab),
             ("Contacts",       self._build_contacts_tab),
             ("Identities",     self._build_identities_tab),
+            ("Generate Key",   self._build_keygen_tab),
             ("Cache Viewer",   self._build_cache_tab),
             ("Privacy Tools",  self._build_privacy_tab),
         ]
@@ -1264,6 +1265,199 @@ class GPGApp(tk.Tk):
         _show_fp_dialog(self, uid, fp)
 
     # ── Cache Viewer Tab ──────────────────────────────────────────────────────
+
+    # ── Generate Key Tab ──────────────────────────────────────────────────────
+
+    def _build_keygen_tab(self, f):
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(9, weight=1)   # output log expands
+
+        tk.Label(f,
+                 text="Generate a new GPG keypair. Your passphrase will be prompted by pinentry — it is never seen by this app.",
+                 bg=BG2, fg=FG2, font=SANS_SM, anchor="w", wraplength=680
+                 ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+
+        # Name
+        section_label(f, "Full Name").grid(row=1, column=0, sticky="w", pady=(0, 2))
+        self.keygen_name_var = tk.StringVar()
+        tk.Entry(f, textvariable=self.keygen_name_var, bg=BG3, fg=FG,
+                 insertbackground=ACCENT, relief="flat", font=SANS,
+                 ).grid(row=2, column=0, sticky="ew", pady=(0, 8), ipady=6)
+
+        # Email
+        section_label(f, "Email Address").grid(row=3, column=0, sticky="w", pady=(0, 2))
+        self.keygen_email_var = tk.StringVar()
+        tk.Entry(f, textvariable=self.keygen_email_var, bg=BG3, fg=FG,
+                 insertbackground=ACCENT, relief="flat", font=SANS,
+                 ).grid(row=4, column=0, sticky="ew", pady=(0, 8), ipady=6)
+
+        # Options row
+        opts = tk.Frame(f, bg=BG2)
+        opts.grid(row=5, column=0, sticky="ew", pady=(0, 12))
+        opts.columnconfigure(1, weight=1)
+        opts.columnconfigure(3, weight=1)
+
+        tk.Label(opts, text="Key Type", bg=BG2, fg=FG, font=SANS_SM).grid(row=0, column=0, sticky="w", padx=(0,6))
+        self.keygen_type_var = tk.StringVar(value="ed25519")
+        type_combo = make_combo(opts, ["ed25519  (recommended)", "rsa4096  (compatible)"],
+                                textvariable=self.keygen_type_var, width=24)
+        type_combo.grid(row=0, column=1, sticky="w", padx=(0, 20))
+        type_combo.bind("<<ComboboxSelected>>", lambda e: self.keygen_type_var.set(
+            "ed25519" if "ed25519" in self.keygen_type_var.get() else "rsa4096"))
+
+        tk.Label(opts, text="Expires", bg=BG2, fg=FG, font=SANS_SM).grid(row=0, column=2, sticky="w", padx=(0,6))
+        self.keygen_expire_var = tk.StringVar(value="2y")
+        exp_combo = make_combo(opts, ["never", "1y", "2y", "5y"],
+                               textvariable=self.keygen_expire_var, width=10)
+        exp_combo.grid(row=0, column=3, sticky="w")
+
+        # Comment (optional)
+        section_label(f, "Comment  (optional)").grid(row=6, column=0, sticky="w", pady=(0, 2))
+        self.keygen_comment_var = tk.StringVar()
+        tk.Entry(f, textvariable=self.keygen_comment_var, bg=BG3, fg=FG,
+                 insertbackground=ACCENT, relief="flat", font=SANS,
+                 ).grid(row=7, column=0, sticky="ew", pady=(0, 12), ipady=6)
+
+        # Generate button
+        btn_row = tk.Frame(f, bg=BG2)
+        btn_row.grid(row=8, column=0, sticky="w", pady=(0, 8))
+        make_button(btn_row, "Generate Keypair", lambda: self._generate_key(), "Accent.TButton").pack(side="left", padx=(0,12))
+        make_button(btn_row, "Clear", lambda: self._clear_keygen()).pack(side="left")
+
+        # Output log
+        section_label(f, "Output").grid(row=9, column=0, sticky="w", pady=(0, 2))
+        c_out, self.keygen_output = make_scrolled_textbox(f, height=10, mono=True)
+        c_out.grid(row=10, column=0, sticky="nsew", pady=(0, 6))
+
+        tk.Label(f,
+                 text="After generating, go to the Identities tab to see your new key and verify its fingerprint.",
+                 bg=BG2, fg=FG2, font=SANS_SM, anchor="w"
+                 ).grid(row=11, column=0, sticky="w")
+
+    def _generate_key(self):
+        name    = self.keygen_name_var.get().strip()
+        email   = self.keygen_email_var.get().strip()
+        comment = self.keygen_comment_var.get().strip()
+        keytype = self.keygen_type_var.get().strip()
+        expire  = self.keygen_expire_var.get().strip()
+
+        # Normalise key type in case combo label text leaked in
+        if "ed25519" in keytype:
+            keytype = "ed25519"
+        elif "rsa" in keytype.lower():
+            keytype = "rsa4096"
+
+        if not name:
+            messagebox.showwarning("Missing Name", "Please enter a full name.")
+            return
+        if not email or "@" not in email:
+            messagebox.showwarning("Missing Email", "Please enter a valid email address.")
+            return
+
+        # Build uid string
+        uid = f"{name}"
+        if comment:
+            uid += f" ({comment})"
+        uid += f" <{email}>"
+
+        # Build gpg --batch key generation parameter block
+        expire_val = "0" if expire == "never" else expire
+        name_comment_line = f"Name-Comment: {comment}\n" if comment else ""
+
+        if keytype == "ed25519":
+            batch = (
+                "%no-protection\n"
+                "Key-Type: EdDSA\n"
+                "Key-Curve: Ed25519\n"
+                "Key-Usage: sign\n"
+                "Subkey-Type: ECDH\n"
+                "Subkey-Curve: Curve25519\n"
+                "Subkey-Usage: encrypt\n"
+                f"Name-Real: {name}\n"
+                + name_comment_line
+                + f"Name-Email: {email}\n"
+                f"Expire-Date: {expire_val}\n"
+                "%commit\n"
+            )
+        else:
+            batch = (
+                "%no-protection\n"
+                "Key-Type: RSA\n"
+                "Key-Length: 4096\n"
+                "Key-Usage: sign\n"
+                "Subkey-Type: RSA\n"
+                "Subkey-Length: 4096\n"
+                "Subkey-Usage: encrypt\n"
+                f"Name-Real: {name}\n"
+                + name_comment_line
+                + f"Name-Email: {email}\n"
+                f"Expire-Date: {expire_val}\n"
+                "%commit\n"
+            )
+
+        set_text(self.keygen_output,
+                 f"Generating {keytype.upper()} keypair for:\n  {uid}\n  Expires: {expire_val or 'never'}\n\nThis may take a few seconds for RSA 4096...\n")
+        self.update()
+
+        try:
+            result = subprocess.run(
+                ["gpg", "--batch", "--gen-key"],
+                input=batch,
+                capture_output=True,
+                text=True,
+                env=get_env(),
+            )
+            _log(f"Key generation attempted for {email}")
+
+            output = (result.stdout + result.stderr).strip()
+
+            if result.returncode != 0:
+                set_text(self.keygen_output,
+                         f"Key generation failed.\n\n{output}")
+                messagebox.showerror("Key Generation Failed", output[:300])
+                return
+
+            # Pull the fingerprint of the newly created key
+            fp_result = subprocess.run(
+                ["gpg", "--list-keys", "--with-colons", "--fingerprint", email],
+                capture_output=True, text=True, env=get_env()
+            )
+            fingerprint = ""
+            for line in fp_result.stdout.splitlines():
+                if line.startswith("fpr"):
+                    fingerprint = line.split(":")[9]
+                    break
+
+            fp_fmt = format_fingerprint(fingerprint) if fingerprint else "(run Show Fingerprint in Identities tab)"
+
+            set_text(self.keygen_output,
+                     f"\u2713 Keypair generated successfully!\n\n"
+                     f"UID:         {uid}\n"
+                     f"Type:        {keytype.upper()}\n"
+                     f"Expires:     {expire_val if expire_val != '0' else 'never'}\n\n"
+                     f"Fingerprint:\n  {fp_fmt}\n\n"
+                     f"Next steps:\n"
+                     f"  1. Go to Identities tab to see your new key\n"
+                     f"  2. Export your public key and share it with contacts\n"
+                     f"  3. Verify fingerprints with contacts out-of-band\n"
+                     f"  4. Back up your private key securely\n\n"
+                     f"GPG output:\n{output}")
+
+            self._refresh_all_keys()
+            messagebox.showinfo("Key Generated",
+                                f"Keypair created for {email}\n\nFingerprint:\n{fp_fmt}\n\n"
+                                f"Verify this fingerprint with contacts through a trusted channel.")
+
+        except Exception as e:
+            set_text(self.keygen_output, f"Error: {e}")
+
+    def _clear_keygen(self):
+        self.keygen_name_var.set("")
+        self.keygen_email_var.set("")
+        self.keygen_comment_var.set("")
+        self.keygen_type_var.set("ed25519")
+        self.keygen_expire_var.set("2y")
+        clear_text(self.keygen_output)
 
     def _build_cache_tab(self, f):
         f.columnconfigure(0, weight=1)
