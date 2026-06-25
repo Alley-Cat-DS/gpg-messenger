@@ -92,7 +92,7 @@ jobs:
             "dist/"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-dmg-${{ matrix.arch }}
           path: ${{ matrix.dmg_name }}
@@ -139,7 +139,7 @@ jobs:
           options: /O+
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: dist/GPG-Messenger-Setup.exe
@@ -230,7 +230,7 @@ jobs:
           ARCH=x86_64 ./appimagetool GPG-Messenger.AppDir GPG-Messenger-Linux-x86_64.AppImage
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-appimage
           path: GPG-Messenger-Linux-x86_64.AppImage
