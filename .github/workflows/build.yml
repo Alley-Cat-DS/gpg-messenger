@@ -258,39 +258,62 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts
+          echo "## SHA256 Checksums" > checksums.txt
+          echo "" >> checksums.txt
+          echo "Verify your download matches these checksums:" >> checksums.txt
+          echo "" >> checksums.txt
+          echo '```' >> checksums.txt
+          find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" \)             -exec sha256sum {} \; | sed 's|.*/||' >> checksums.txt
+          echo '```' >> checksums.txt
+          echo "" >> checksums.txt
+          echo "**macOS:** \`shasum -a 256 GPG-Messenger-macOS-Intel.dmg\`" >> checksums.txt
+          echo "**Linux/Windows:** \`sha256sum filename\`" >> checksums.txt
+          cat checksums.txt
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: GPG Messenger ${{ steps.version.outputs.tag }}
+          name: AlleyCat GPG ${{ steps.version.outputs.tag }}
           draft: false
           prerelease: false
           body: |
-            ## GPG Messenger ${{ steps.version.outputs.tag }}
+            ## AlleyCat GPG ${{ steps.version.outputs.tag }}
 
-            A local desktop GUI wrapper for GnuPG. All cryptography is handled
-            by your system's `gpg` binary — this app never implements its own crypto.
+            A local desktop GUI wrapper for GnuPG. Encrypt and decrypt text,
+            documents, and images for sending over SMS or any channel —
+            without ISP or cell tower visibility into your content.
+
+            All cryptography is handled by your system's `gpg` binary.
+            This app never implements its own crypto, stores plaintext,
+            or makes network requests.
 
             ### Downloads
 
             | Platform | File | Notes |
             |----------|------|-------|
-            | macOS (Intel) | `GPG-Messenger-macOS-Intel.dmg` | For 2020 and older Macs. Drag to Applications. |
-            | macOS (Apple Silicon) | `GPG-Messenger-macOS-AppleSilicon.dmg` | For M1/M2/M3/M4 Macs. Drag to Applications. |
-            | Windows | `GPG-Messenger-Setup.exe` | Installer. Requires [Gpg4win](https://gpg4win.org) |
-            | Linux | `GPG-Messenger-Linux-x86_64.AppImage` | Make executable and run. GnuPG usually pre-installed. |
+            | macOS Intel | `GPG-Messenger-macOS-Intel.dmg` | For 2020 and older Macs. Drag to Applications. |
+            | macOS Apple Silicon | `GPG-Messenger-macOS-AppleSilicon.dmg` | For M1/M2/M3/M4 Macs. Drag to Applications. |
+            | Windows | `GPG-Messenger-Setup.exe` | Requires [Gpg4win](https://gpg4win.org) |
+            | Linux | `GPG-Messenger-Linux-x86_64.AppImage` | No install needed. Make executable and run. |
 
-            ### First Run
+            ### First Run (macOS)
+            If Gatekeeper blocks the app: right-click → Open → Open anyway.
+            Or run: `xattr -cr "/Applications/GPG Messenger.app"`
 
-            The app will check for `gpg` on startup and guide you through
-            installing it if missing.
+            The app checks for `gpg` on startup and offers to install it if missing.
 
-            ### Security Note
-
-            This app delegates all cryptographic operations to your locally
-            installed `gpg` binary. No plaintext is stored, logged, or transmitted.
+            ### Security
+            - No custom cryptography
+            - No plaintext storage or logging
+            - No network requests or telemetry
+            - See [THREAT_MODEL.md](https://github.com/Alley-Cat-DS/gpg-messenger/blob/main/THREAT_MODEL.md) for full details
           files: |
             artifacts/macos-dmg-x86_64/GPG-Messenger-macOS-Intel.dmg
             artifacts/macos-dmg-arm64/GPG-Messenger-macOS-AppleSilicon.dmg
             artifacts/windows-installer/GPG-Messenger-Setup.exe
             artifacts/linux-appimage/GPG-Messenger-Linux-x86_64.AppImage
+            artifacts/checksums.txt
