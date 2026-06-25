@@ -16,10 +16,19 @@ on:
 
 jobs:
 
-  # ── macOS build ─────────────────────────────────────────────────────────────
+  # ── macOS builds — Intel (x86_64) and Apple Silicon (arm64) ─────────────────
   build-macos:
-    name: Build macOS .dmg
-    runs-on: macos-latest
+    name: Build macOS .dmg (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13        # last Intel runner on GitHub Actions
+            dmg_name: GPG-Messenger-macOS-Intel.dmg
+          - arch: arm64
+            runner: macos-latest    # Apple Silicon (M1+)
+            dmg_name: GPG-Messenger-macOS-AppleSilicon.dmg
 
     steps:
       - name: Checkout
@@ -79,14 +88,14 @@ jobs:
             --icon "GPG Messenger.app" 175 190 \
             --hide-extension "GPG Messenger.app" \
             --app-drop-link 425 190 \
-            "GPG-Messenger-macOS.dmg" \
+            "${{ matrix.dmg_name }}" \
             "dist/"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
-          path: GPG-Messenger-macOS.dmg
+          name: macos-dmg-${{ matrix.arch }}
+          path: ${{ matrix.dmg_name }}
 
   # ── Windows build ────────────────────────────────────────────────────────────
   build-windows:
@@ -229,7 +238,7 @@ jobs:
   # ── Create GitHub Release ────────────────────────────────────────────────────
   release:
     name: Publish GitHub Release
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux]  # build-macos is a matrix job
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -266,7 +275,8 @@ jobs:
 
             | Platform | File | Notes |
             |----------|------|-------|
-            | macOS | `GPG-Messenger-macOS.dmg` | Drag to Applications. Requires GnuPG: `brew install gnupg` |
+            | macOS (Intel) | `GPG-Messenger-macOS-Intel.dmg` | For 2020 and older Macs. Drag to Applications. |
+            | macOS (Apple Silicon) | `GPG-Messenger-macOS-AppleSilicon.dmg` | For M1/M2/M3/M4 Macs. Drag to Applications. |
             | Windows | `GPG-Messenger-Setup.exe` | Installer. Requires [Gpg4win](https://gpg4win.org) |
             | Linux | `GPG-Messenger-Linux-x86_64.AppImage` | Make executable and run. GnuPG usually pre-installed. |
 
@@ -280,6 +290,7 @@ jobs:
             This app delegates all cryptographic operations to your locally
             installed `gpg` binary. No plaintext is stored, logged, or transmitted.
           files: |
-            artifacts/macos-dmg/GPG-Messenger-macOS.dmg
+            artifacts/macos-dmg-x86_64/GPG-Messenger-macOS-Intel.dmg
+            artifacts/macos-dmg-arm64/GPG-Messenger-macOS-AppleSilicon.dmg
             artifacts/windows-installer/GPG-Messenger-Setup.exe
             artifacts/linux-appimage/GPG-Messenger-Linux-x86_64.AppImage
