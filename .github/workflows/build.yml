@@ -1,0 +1,285 @@
+name: Build and Release
+
+# Triggers:
+#   - Push a tag like v2.0.0 → builds all platforms and creates a GitHub Release
+#   - Manual trigger via GitHub UI (Actions → Run workflow)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (e.g. v2.0.0)'
+        required: true
+        default: 'v2.0.0'
+
+jobs:
+
+  # ── macOS build ─────────────────────────────────────────────────────────────
+  build-macos:
+    name: Build macOS .dmg
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Tkinter (via Homebrew)
+        run: brew install python-tk@3.11
+
+      - name: Install Python deps
+        run: pip install --upgrade pyinstaller
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Generate placeholder icon (if missing)
+        run: |
+          mkdir -p assets
+          if [ ! -f assets/icon.icns ]; then
+            python3 - << 'PYEOF'
+          import struct, zlib, os
+          def make_png(size=512):
+              def chunk(name, data):
+                  c = name + data
+                  return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+              sig = b'\x89PNG\r\n\x1a\n'
+              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+              row = b'\x00' + b'\x1a\x1b\x1e' * size
+              raw = row * size
+              idat = chunk(b'IDAT', zlib.compress(raw))
+              iend = chunk(b'IEND', b'')
+              return sig + ihdr + idat + iend
+          os.makedirs('assets/icon.iconset', exist_ok=True)
+          for size in [16, 32, 64, 128, 256, 512]:
+              data = make_png(size)
+              open(f'assets/icon.iconset/icon_{size}x{size}.png', 'wb').write(data)
+              open(f'assets/icon.iconset/icon_{size}x{size}@2x.png', 'wb').write(data)
+          PYEOF
+            iconutil -c icns assets/icon.iconset -o assets/icon.icns
+          fi
+
+      - name: Build .app
+        run: python3 -m PyInstaller gpg_messenger.spec --noconfirm
+
+      - name: Package .dmg
+        run: |
+          create-dmg \
+            --volname "GPG Messenger" \
+            --volicon "assets/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "GPG Messenger.app" 175 190 \
+            --hide-extension "GPG Messenger.app" \
+            --app-drop-link 425 190 \
+            "GPG-Messenger-macOS.dmg" \
+            "dist/"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: GPG-Messenger-macOS.dmg
+
+  # ── Windows build ────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install --upgrade pyinstaller
+
+      - name: Generate placeholder icon (if missing)
+        shell: python
+        run: |
+          import os, struct
+          os.makedirs('assets', exist_ok=True)
+          if not os.path.exists('assets/icon.ico'):
+              size = 32
+              bmp_header = struct.pack('<IiiHHIIiiII', 40, size, -size, 1, 32, 0, size*size*4, 0, 0, 0, 0)
+              pixels = b'\x1a\x1b\x1e\xff' * (size * size)
+              bmp_data = bmp_header + pixels
+              ico_header = struct.pack('<HHH', 0, 1, 1)
+              ico_entry = struct.pack('<BBBBHHII', size, size, 0, 0, 1, 32, len(bmp_data), 22)
+              open('assets/icon.ico', 'wb').write(ico_header + ico_entry + bmp_data)
+              print('icon.ico created.')
+
+      - name: Build .exe
+        run: python -m PyInstaller gpg_messenger.spec --noconfirm
+
+      - name: Build installer with Inno Setup
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer_windows.iss
+          options: /O+
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/GPG-Messenger-Setup.exe
+
+  # ── Linux build ──────────────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-tk python3-dev libfuse2 file
+
+      - name: Install Python deps
+        run: pip install --upgrade pyinstaller
+
+      - name: Generate placeholder icon (if missing)
+        run: |
+          mkdir -p assets
+          if [ ! -f assets/icon.png ]; then
+            python3 - << 'PYEOF'
+          import struct, zlib
+          def make_png(size=256):
+              def chunk(name, data):
+                  c = name + data
+                  return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+              sig = b'\x89PNG\r\n\x1a\n'
+              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+              row = b'\x00' + b'\x1a\x1b\x1e' * size
+              raw = row * size
+              idat = chunk(b'IDAT', zlib.compress(raw))
+              iend = chunk(b'IEND', b'')
+              return sig + ihdr + idat + iend
+          open('assets/icon.png', 'wb').write(make_png(256))
+          PYEOF
+          fi
+
+      - name: Build with PyInstaller
+        run: python3 -m PyInstaller gpg_messenger.spec --noconfirm
+
+      - name: Download appimagetool
+        run: |
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+      - name: Build AppDir
+        run: |
+          APPDIR="GPG-Messenger.AppDir"
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/share/applications"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp -r "dist/GPG Messenger/." "$APPDIR/usr/bin/"
+
+          cat > "$APPDIR/usr/share/applications/gpg-messenger.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Name=GPG Messenger
+          Comment=Secure GPG encrypted messaging
+          Exec=GPG Messenger
+          Icon=gpg-messenger
+          Type=Application
+          Categories=Security;Network;
+          DESKTOP
+
+          cat > "$APPDIR/AppRun" << 'APPRUN'
+          #!/usr/bin/env bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "$HERE/usr/bin/GPG Messenger" "$@"
+          APPRUN
+          chmod +x "$APPDIR/AppRun"
+
+          cp assets/icon.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/gpg-messenger.png"
+          cp assets/icon.png "$APPDIR/gpg-messenger.png"
+          cp "$APPDIR/usr/share/applications/gpg-messenger.desktop" "$APPDIR/gpg-messenger.desktop"
+
+      - name: Package AppImage
+        run: |
+          ARCH=x86_64 ./appimagetool GPG-Messenger.AppDir GPG-Messenger-Linux-x86_64.AppImage
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: GPG-Messenger-Linux-x86_64.AppImage
+
+  # ── Create GitHub Release ────────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: GPG Messenger ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: false
+          body: |
+            ## GPG Messenger ${{ steps.version.outputs.tag }}
+
+            A local desktop GUI wrapper for GnuPG. All cryptography is handled
+            by your system's `gpg` binary — this app never implements its own crypto.
+
+            ### Downloads
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | macOS | `GPG-Messenger-macOS.dmg` | Drag to Applications. Requires GnuPG: `brew install gnupg` |
+            | Windows | `GPG-Messenger-Setup.exe` | Installer. Requires [Gpg4win](https://gpg4win.org) |
+            | Linux | `GPG-Messenger-Linux-x86_64.AppImage` | Make executable and run. GnuPG usually pre-installed. |
+
+            ### First Run
+
+            The app will check for `gpg` on startup and guide you through
+            installing it if missing.
+
+            ### Security Note
+
+            This app delegates all cryptographic operations to your locally
+            installed `gpg` binary. No plaintext is stored, logged, or transmitted.
+          files: |
+            artifacts/macos-dmg/GPG-Messenger-macOS.dmg
+            artifacts/windows-installer/GPG-Messenger-Setup.exe
+            artifacts/linux-appimage/GPG-Messenger-Linux-x86_64.AppImage

@@ -1,0 +1,24 @@
+# Build outputs
+build/
+dist/
+*.AppDir/
+*.AppImage
+appimagetool*
+GPG-Messenger-*.dmg
+GPG-Messenger-Setup.exe
+GPG-Messenger-Windows.zip
+
+# PyInstaller
+*.spec.bak
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+assets/icon.iconset/
+
+# Editor
+.vscode/
+.idea/
+*.swp
